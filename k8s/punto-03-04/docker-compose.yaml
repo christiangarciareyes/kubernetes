@@ -1,0 +1,59 @@
+version: '3.4'
+
+services:
+  mysql_server:
+    build: basedatos/
+    image: cgarciar29/k8s-api-persona-bd
+    environment:
+      - MYSQL_ROOT_PASSWORD=toor
+      - MYSQL_DATABASE=demobd
+      - MYSQL_ROOT_HOST=%
+    ports:
+      - "3306:3306"
+    # volumes:
+    #   - ./basedatos/scripts/:/docker-entrypoint-initdb.d/
+    restart: on-failure
+
+  apipersona:
+    build: api-persona/
+    image: cgarciar29/k8s-api-persona
+    environment:
+      - host=mysql_server #localhost #bd
+      - TRACE_ENABLED=true
+      - TRACER_URL=http://jaeger:9411/api/v2/spans
+    ports:
+      - "8081:8080"
+    # healthcheck:
+    #   test: "curl --fail http://localhost:8080/actuator/health/liveness || exit 1" # curl debe estar instalado en la imagen, en k8s no es necesario tenerlo instalado
+    #   interval: 10s
+    #   timeout: 5s
+    #   retries: 5
+    restart: on-failure
+    depends_on:
+      - mysql_server
+
+  jaeger:
+    image: jaegertracing/all-in-one:1.45.0
+    ports:
+      - "16686"
+      - "14268:14268"
+      - "14250:14250"
+      - "6831:6831/udp"
+      - "6832:6832/udp"
+      - "9411:9411"
+      - "4318:4318"
+    environment:
+      - COLLECTOR_ZIPKIN_HOST_PORT=:9411
+      - COLLECTOR_OTLP_ENABLED=true
+
+  prometheus:
+    image: prom/prometheus:v2.44.0
+    ports:
+      - "9090"
+    volumes: 
+      - /c/Users/Usuario/Documents/Docker/Fuentes/cluster-local/apps/basic/prometheus/:/etc/prometheus/
+    command: 
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+      - '--web.console.libraries=/usr/share/prometheus/console_libraries'
+      - '--web.console.templates=/usr/share/prometheus/consoles'

@@ -1,0 +1,118 @@
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: api-persona
+  namespace: default
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: api-persona
+  labels:
+    env: dev
+data:
+  API_PERSONA_BD_HOST: "localhost"
+  MYSQL_ROOT_HOST: "%"
+  TRACER_URL: "http://jaeger:14268/api/traces"
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: api-persona
+type: Opaque
+stringData:
+  MYSQL_ROOT_PASSWORD: 'toor'
+---
+apiVersion: v1
+kind: Pod
+metadata:
+  name: apipersona
+  namespace: default
+  labels:
+    app: apipersona
+    version: v1
+spec:
+  nodeSelector:
+    node: workloads
+  serviceAccount: api-persona
+  volumes: # aquí se declara el volume y de qué tipo será
+  - name: temp
+    emptyDir: {}
+  containers:
+  - name: bd 
+    image: cgarciar29/k8s-api-persona-bd
+    env:
+    - name: MYSQL_ROOT_PASSWORD
+      valueFrom:
+         secretKeyRef:
+           name: api-persona
+           key: MYSQL_ROOT_PASSWORD
+    - name: MYSQL_ROOT_HOST
+      valueFrom:
+         configMapKeyRef:
+           name: api-persona
+           key: MYSQL_ROOT_HOST
+    ports:
+       - containerPort: 3306
+  - image: cgarciar29/k8s-api-persona
+    imagePullPolicy: IfNotPresent
+    name: api
+    volumeMounts: # aquí se anexa un volume en alguna ruta del container
+    - mountPath: /tmp/
+      name: temp
+    securityContext:
+      allowPrivilegeEscalation: false
+      readOnlyRootFilesystem: true
+      runAsNonRoot: true
+      runAsUser: 2000
+      runAsGroup: 2000
+      capabilities:
+        drop:
+          - all
+    env:
+    - name: host
+      valueFrom:
+          configMapKeyRef:
+            name: api-persona
+            key: API_PERSONA_BD_HOST
+    - name: username
+      value: root
+    - name: password
+      valueFrom:
+          secretKeyRef:
+            name: api-persona
+            key: MYSQL_ROOT_PASSWORD
+    - name: TRACE_ENABLED
+      value: "true"
+    - name: TRACER_URL
+      valueFrom:
+          configMapKeyRef:
+            name: api-persona
+            key: TRACER_URL
+    resources:
+      requests:
+        memory: "512Mi"
+        cpu: "50m" # 1000m = 1
+      limits:
+        memory: "1024Mi"
+        cpu: "500m"
+    ports:
+    - containerPort: 8080
+      protocol: TCP
+    livenessProbe:
+        httpGet:
+          path: /actuator/health/liveness
+          port: 8080
+        initialDelaySeconds: 40
+        timeoutSeconds: 5
+        periodSeconds: 10
+        failureThreshold: 5
+        successThreshold: 1
+    readinessProbe:
+        httpGet:
+          path: /actuator/health/readiness # puede ser solo la raiz "/", probar esto en caso no funcione en azure application gateway
+          port: 8080
+        initialDelaySeconds: 20
+        timeoutSeconds: 5
+        periodSeconds: 5
+        # successThreshold: 1
